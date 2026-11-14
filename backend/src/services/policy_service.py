@@ -12,6 +12,7 @@ from src.constants.enums import (
     RULE_OP_LABELS,
 )
 from src.models.policy import Policy
+from src.models.policy_group import PolicyGroup
 from src.models.rule import Rule
 from src.services import rule_extractor
 from src.utils.errors import AppError, not_found
@@ -26,7 +27,12 @@ def serialize_rules_summary(rules: list[Rule]) -> dict:
     }
 
 
-def serialize(policy: Policy, rules: list[Rule] | None = None, match_stats: dict | None = None) -> dict:
+def serialize(
+    policy: Policy,
+    rules: list[Rule] | None = None,
+    match_stats: dict | None = None,
+    group: PolicyGroup | None = None,
+) -> dict:
     rules = rules if rules is not None else []
     return {
         "id": policy.id,
@@ -43,6 +49,9 @@ def serialize(policy: Policy, rules: list[Rule] | None = None, match_stats: dict
         "original_text": policy.original_text,
         "status": policy.status,
         "status_label": POLICY_STATUS_LABELS.get(policy.status, policy.status),
+        "group_id": policy.group_id,
+        "group_code": group.code if group else None,
+        "group_name": group.name if group else None,
         "created_at": iso_utc(policy.created_at),
         "rules": [serialize_rule(item) for item in rules],
         **serialize_rules_summary(rules),
@@ -114,9 +123,14 @@ def list_policies(
             .group_by(Rule.policy_id)
         ).all()
     }
+    group_ids = {row.group_id for row in rows if row.group_id}
+    groups = {
+        item.id: item
+        for item in db.scalars(select(PolicyGroup).where(PolicyGroup.id.in_(group_ids))).all()
+    } if group_ids else {}
     items = []
     for row in rows:
-        item = serialize(row)
+        item = serialize(row, group=groups.get(row.group_id))
         item["rules_total"] = rule_counts.get(row.id, 0)
         item["low_confidence_total"] = low_counts.get(row.id, 0)
         items.append(item)
@@ -130,10 +144,25 @@ def get_policy(db: Session, policy_id: int) -> Policy:
     return policy
 
 
+def group_of(db: Session, policy: Policy) -> PolicyGroup | None:
+    return db.get(PolicyGroup, policy.group_id) if policy.group_id else None
+
+
+def _resolve_group(db: Session, group_code: str | None) -> PolicyGroup | None:
+    """按编号解析政策组；空串 / None 表示不分组。"""
+    if not group_code:
+        return None
+    group = db.scalar(select(PolicyGroup).where(PolicyGroup.code == group_code))
+    if group is None:
+        raise AppError("NOT_FOUND", 404, {"entity": "policy_group", "code": group_code})
+    return group
+
+
 def create_policy(db: Session, payload: dict) -> Policy:
     exists = db.scalar(select(Policy).where(Policy.code == payload["code"]))
     if exists is not None:
         raise AppError("CONFLICT", 409, {"code": payload["code"]})
+    group = _resolve_group(db, payload.get("group_code"))
     policy = Policy(
         code=payload["code"],
         title=payload["title"],
@@ -146,6 +175,7 @@ def create_policy(db: Session, payload: dict) -> Policy:
         fund_cap_wan=payload.get("fund_cap_wan"),
         original_text=payload.get("original_text") or "",
         status=payload.get("status") or "draft",
+        group_id=group.id if group else None,
     )
     db.add(policy)
     db.flush()
@@ -159,6 +189,9 @@ def update_policy(db: Session, policy: Policy, payload: dict) -> Policy:
     for field in ("published_on", "deadline"):
         if field in payload:
             setattr(policy, field, parse_date(payload[field]))
+    if "group_code" in payload:
+        group = _resolve_group(db, payload.get("group_code"))
+        policy.group_id = group.id if group else None
     db.flush()
     return policy
 

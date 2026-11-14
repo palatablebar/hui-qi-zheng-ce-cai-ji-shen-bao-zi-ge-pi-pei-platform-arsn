@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Integer, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models import Base
@@ -25,6 +25,9 @@ class Policy(Base):
     fund_cap_wan: Mapped[int | None] = mapped_column(Integer, nullable=True)
     original_text: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(12), default="active", index=True)
+    group_id: Mapped[int | None] = mapped_column(
+        ForeignKey("policy_groups.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     seed_key: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

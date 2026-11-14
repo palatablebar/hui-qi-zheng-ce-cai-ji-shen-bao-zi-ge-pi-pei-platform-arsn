@@ -17,9 +17,14 @@ import {
 
 const state = { q: '', status: '', channel: '' };
 
-function openPolicy(view, ctx, policy) {
+function openPolicy(view, ctx, policy, groups) {
   const canExtract = can(ctx.user.role, 'rule:extract');
+  const canWrite = can(ctx.user.role, 'policy:write');
   const rules = policy.rules || [];
+  const groupOptions = [
+    { value: '', label: '不分组（不参与名额分配）' },
+    ...(groups || []).map((item) => ({ value: item.code, label: `${item.code} ${item.name}` })),
+  ];
   const { root, close } = drawer({
     title: policy.title,
     subtitle: `${policy.code} · ${policy.doc_no}`,
@@ -30,15 +35,18 @@ function openPolicy(view, ctx, policy) {
         ['发布日期', fmtTime(policy.published_on)],
         ['申报截止', `<b>${esc(policy.deadline || '未定')}</b>`],
         ['资助上限', policy.fund_cap_wan ? `${esc(policy.fund_cap_wan)} 万元` : '—'],
+        ['所属政策组', policy.group_name ? `${esc(policy.group_name)}（${esc(policy.group_code)}）` : '未分组'],
         ['条件 / 低置信', `${policy.rules_total ?? rules.length} 条 / <b style="color:var(--seal)">${policy.low_confidence_total ?? rules.filter((r) => r.confidence < 0.6).length} 条</b>`],
       ])}
       <h3 style="margin:14px 0 6px;font-size:0.98rem">政策原文</h3>
       <div class="doc-text">${esc(policy.original_text)}</div>
       <h3 style="margin:14px 0 6px;font-size:0.98rem">申报条件（置信度 &lt; 0.60 需人工确认）</h3>
       ${ruleList(rules)}`,
-    footer: canExtract
-      ? `<button class="btn accent" data-extract>重新抽取申报条件</button>`
-      : '<span class="mono muted">只读角色可查看条件，不能抽取</span>',
+    footer: `${canExtract ? '<button class="btn accent" data-extract>重新抽取申报条件</button>' : '<span class="mono muted">只读角色可查看条件，不能抽取</span>'}
+      ${canWrite ? `<form id="policy-group-form" style="display:flex;gap:8px;align-items:end;margin-top:10px">
+        ${field({ label: '政策组（同组互斥，共享名额）', name: 'group_code', value: policy.group_code || '', options: groupOptions })}
+        <button class="btn ghost" type="submit">保存分组</button>
+      </form>` : ''}`,
   });
   root.querySelector('[data-extract]')?.addEventListener('click', async (event) => {
     const button = event.currentTarget;
@@ -55,9 +63,25 @@ function openPolicy(view, ctx, policy) {
       button.textContent = '重新抽取申报条件';
     }
   });
+  root.querySelector('#policy-group-form')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    try {
+      await api.patch(`/api/policies/${policy.id}`, { group_code: form.group_code.value || null });
+      toast('政策分组已更新');
+      close();
+      await policiesPage.render(view, ctx);
+    } catch (err) {
+      toast(errorMessage(err), 'err');
+    }
+  });
 }
 
-function openCreate(view, ctx) {
+function openCreate(view, ctx, groups) {
+  const groupOptions = [
+    { value: '', label: '不分组（不参与名额分配）' },
+    ...(groups || []).map((item) => ({ value: item.code, label: `${item.code} ${item.name}` })),
+  ];
   const { root, close } = drawer({
     title: '登记新政策',
     subtitle: '原文入库后可立即抽取申报条件',
@@ -69,6 +93,7 @@ function openCreate(view, ctx) {
       ${field({ label: '采集渠道', name: 'source_kind', value: 'website', options: Object.entries(ENUMS.channel).map(([value, label]) => ({ value, label })) })}
       ${field({ label: '申报截止', name: 'deadline', type: 'date' })}
       ${field({ label: '资助上限（万元）', name: 'fund_cap_wan', type: 'number' })}
+      ${field({ label: '政策组（同组互斥，共享名额）', name: 'group_code', options: groupOptions })}
       <div class="field"><label for="original_text">政策原文</label><textarea id="original_text" name="original_text" rows="5" placeholder="粘贴通知正文，抽取器会识别营业收入、研发占比、注册地、资质与截止日"></textarea></div>
       <div class="form-error" id="policy-error"></div>
       <button class="btn accent" type="submit">登记入库</button>
@@ -88,6 +113,7 @@ function openCreate(view, ctx) {
         fund_cap_wan: form.fund_cap_wan.value ? Number(form.fund_cap_wan.value) : null,
         original_text: form.original_text.value.trim(),
         status: 'active',
+        group_code: form.group_code.value || null,
       });
       await api.post(`/api/policies/${created.id}/extract-rules`, {});
       toast('政策已登记并完成条件抽取');
@@ -103,13 +129,17 @@ function openCreate(view, ctx) {
 export const policiesPage = {
   async render(view, ctx) {
     let data;
+    let groups = { items: [] };
     try {
-      data = await api.get('/api/policies', {
-        q: state.q,
-        status: state.status,
-        channel: state.channel,
-        limit: 50,
-      });
+      [data, groups] = await Promise.all([
+        api.get('/api/policies', {
+          q: state.q,
+          status: state.status,
+          channel: state.channel,
+          limit: 50,
+        }),
+        api.get('/api/policy-groups'),
+      ]);
     } catch (err) {
       view.innerHTML = errorBox(errorMessage(err));
       view.querySelector('#retry-btn')?.addEventListener('click', () => policiesPage.render(view, ctx));
@@ -144,6 +174,11 @@ export const policiesPage = {
             },
             { key: 'issuer', label: '发文机关' },
             { key: 'source_name', label: '采集渠道' },
+            {
+              key: 'group_name',
+              label: '政策组',
+              render: (row) => (row.group_name ? `<span class="badge info">${esc(row.group_name)}</span>` : '<span class="muted">—</span>'),
+            },
             { key: 'deadline', label: '申报截止', className: 'mono', render: (row) => esc(row.deadline || '未定') },
             {
               key: 'rules_total',
@@ -180,18 +215,18 @@ export const policiesPage = {
         if (!item) return;
         try {
           const detail = await api.get(`/api/policies/${item.id}`);
-          openPolicy(view, ctx, detail);
+          openPolicy(view, ctx, detail, groups.items);
         } catch (err) {
           toast(errorMessage(err), 'err');
         }
       });
     });
-    view.querySelector('#new-policy')?.addEventListener('click', () => openCreate(view, ctx));
+    view.querySelector('#new-policy')?.addEventListener('click', () => openCreate(view, ctx, groups.items));
 
     if (ctx.query.policy_id) {
       try {
         const detail = await api.get(`/api/policies/${ctx.query.policy_id}`);
-        openPolicy(view, ctx, detail);
+        openPolicy(view, ctx, detail, groups.items);
       } catch {
         /* 打开失败时保留列表 */
       }

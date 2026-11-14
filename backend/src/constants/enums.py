@@ -146,6 +146,86 @@ REVIEW_STATUS_ORDER: list[str] = [
 ]
 
 
+class PublicStatus(StrEnum):
+    """政策组公示状态：未公示 / 公示中 / 已公示（已公示锁定既定名单）。"""
+
+    UNPUBLISHED = "unpublished"
+    PUBLICIZING = "publicizing"
+    FINALIZED = "finalized"
+
+
+PUBLIC_STATUS_LABELS: dict[str, str] = {
+    PublicStatus.UNPUBLISHED.value: "未公示",
+    PublicStatus.PUBLICIZING.value: "公示中",
+    PublicStatus.FINALIZED.value: "已公示",
+}
+
+PUBLIC_STATUS_ORDER: list[str] = [
+    PublicStatus.UNPUBLISHED.value,
+    PublicStatus.PUBLICIZING.value,
+    PublicStatus.FINALIZED.value,
+]
+
+# 公示状态允许的流转：已公示为终态，不可逆
+PUBLIC_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    PublicStatus.UNPUBLISHED.value: {
+        PublicStatus.UNPUBLISHED.value,
+        PublicStatus.PUBLICIZING.value,
+        PublicStatus.FINALIZED.value,
+    },
+    PublicStatus.PUBLICIZING.value: {
+        PublicStatus.PUBLICIZING.value,
+        PublicStatus.UNPUBLISHED.value,
+        PublicStatus.FINALIZED.value,
+    },
+    PublicStatus.FINALIZED.value: {PublicStatus.FINALIZED.value},
+}
+
+
+class AllocationStatus(StrEnum):
+    """名额占位状态：正式 / 候补 / 淘汰 / 已撤销。"""
+
+    OFFICIAL = "official"
+    WAITLIST = "waitlist"
+    EXCLUDED = "excluded"
+    REVOKED = "revoked"
+
+
+ALLOCATION_STATUS_LABELS: dict[str, str] = {
+    AllocationStatus.OFFICIAL.value: "正式占位",
+    AllocationStatus.WAITLIST.value: "候补",
+    AllocationStatus.EXCLUDED.value: "淘汰",
+    AllocationStatus.REVOKED.value: "已撤销",
+}
+
+ALLOCATION_STATUS_ORDER: list[str] = [
+    AllocationStatus.OFFICIAL.value,
+    AllocationStatus.WAITLIST.value,
+    AllocationStatus.EXCLUDED.value,
+    AllocationStatus.REVOKED.value,
+]
+
+
+class ExclusionReason(StrEnum):
+    """淘汰原因：互斥（同组他政策已占位）/ 名额已满。"""
+
+    MUTEX = "mutex"
+    QUOTA = "quota"
+
+
+EXCLUSION_REASON_LABELS: dict[str, str] = {
+    ExclusionReason.MUTEX.value: "互斥淘汰",
+    ExclusionReason.QUOTA.value: "名额已满",
+}
+
+
+def allocation_status_text(status: str, reason: str | None = None) -> str:
+    """名额状态展示文案：淘汰需带上原因（互斥淘汰 / 名额已满）。"""
+    if status == AllocationStatus.EXCLUDED.value and reason:
+        return EXCLUSION_REASON_LABELS.get(reason, reason)
+    return ALLOCATION_STATUS_LABELS.get(status, status)
+
+
 class MatchRunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"

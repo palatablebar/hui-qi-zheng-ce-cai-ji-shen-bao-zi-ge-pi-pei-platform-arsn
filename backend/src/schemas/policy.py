@@ -17,6 +17,7 @@ class PolicyIn(BaseModel):
     fund_cap_wan: int | None = Field(default=None, ge=0, le=1000000)
     original_text: str = Field(default="", max_length=20000)
     status: str = Field(default=PolicyStatus.DRAFT.value, max_length=12)
+    group_code: str | None = Field(default=None, max_length=40)
 
 
 class PolicyPatch(BaseModel):
@@ -30,3 +31,4 @@ class PolicyPatch(BaseModel):
     fund_cap_wan: int | None = Field(default=None, ge=0, le=1000000)
     original_text: str | None = Field(default=None, max_length=20000)
     status: str | None = Field(default=None, max_length=12)
+    group_code: str | None = Field(default=None, max_length=40)

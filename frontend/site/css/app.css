@@ -1209,6 +1209,50 @@ h3 {
   color: var(--ink-soft);
 }
 
+/* ---------- 政策组名额条 ---------- */
+.group-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.group-card {
+  border: 1px solid var(--rule-strong);
+  border-left: 3px solid var(--seal);
+  background: var(--paper);
+  padding: 10px 12px;
+  display: grid;
+  gap: 5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.group-card:hover {
+  background: var(--paper-2);
+}
+
+.group-card .gc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-card .gc-head b {
+  font-size: 0.95rem;
+}
+
+.group-card .gc-stats {
+  font-size: var(--fs-xs);
+  color: var(--ink);
+  letter-spacing: 0.02em;
+}
+
+.group-card .gc-policies {
+  font-size: var(--fs-xs);
+}
+
 /* ---------- 截止周历 ---------- */
 .calendar {
   display: grid;

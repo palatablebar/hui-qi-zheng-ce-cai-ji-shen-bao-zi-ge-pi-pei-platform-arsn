@@ -46,7 +46,13 @@ def daily_match() -> dict:
             action="match.run",
             entity="match_run",
             entity_id=run.id,
-            detail={"trigger": "schedule", "run_no": run.run_no, "matches": run.match_count},
+            detail={
+                "trigger": "schedule",
+                "run_no": run.run_no,
+                "matches": run.match_count,
+                "batch_key": run.batch_key,
+                "reused": bool(getattr(run, "_reused", False)),
+            },
             layer="worker",
         )
     logger.info("daily match finished: %s matches", run.match_count)

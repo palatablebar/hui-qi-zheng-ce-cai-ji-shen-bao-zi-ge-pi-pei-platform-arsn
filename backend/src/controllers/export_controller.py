@@ -50,3 +50,43 @@ def policies_csv(db: Session, principal: dict, request: Request) -> Response:
         media_type="text/csv; charset=utf-8",
         headers=csv_response_headers("policyfit-policies.csv"),
     )
+
+
+def groups_csv(db: Session, principal: dict, request: Request) -> Response:
+    content, count = export_service.groups_csv(db)
+    audit_service.record(
+        db,
+        actor_email=principal["email"],
+        actor_role=principal["role"],
+        action="export.groups",
+        entity="policy_group",
+        entity_id=None,
+        detail={"rows": count, "bytes": len(content)},
+        ip=_ip(request),
+    )
+    db.commit()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers=csv_response_headers("policyfit-groups.csv"),
+    )
+
+
+def groups_csv(db: Session, principal: dict, request: Request) -> Response:
+    content, count = export_service.groups_csv(db)
+    audit_service.record(
+        db,
+        actor_email=principal["email"],
+        actor_role=principal["role"],
+        action="export.groups",
+        entity="policy_group",
+        entity_id=None,
+        detail={"rows": count, "bytes": len(content)},
+        ip=_ip(request),
+    )
+    db.commit()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers=csv_response_headers("policyfit-groups.csv"),
+    )

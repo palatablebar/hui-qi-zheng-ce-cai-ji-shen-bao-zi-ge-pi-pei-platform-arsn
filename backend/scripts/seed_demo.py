@@ -1,26 +1,30 @@
-"""幂等 seed：3 账号 / 12 条政策 / 38 条条件 / 120 家企业 / 1 次匹配运行（40 条结果）。
+"""幂等 seed：3 账号 / 12 条政策 / 2 个政策组 / 38 条条件 / 120 家企业 / 1 次匹配运行（40 条结果）。
 
 自然键 upsert：
   users.email
   policies.code
+  policy_groups.code
   rules (policy_id, field, op, value)
   companies.code
-  match_runs.seed_key
+  match_runs.seed_key / batch_key
   matches (run_id, policy_id, company_id)
+  allocations (group_id, policy_id, company_id)
   audit_logs.seed_key
 
-重复执行不新增、不覆盖用户改过的复核状态；SEED_SUMMARY 逐字一致。
+重复执行不新增、不覆盖用户改过的复核状态与公示状态；SEED_SUMMARY 逐字一致。
 """
 from __future__ import annotations
 
 from sqlalchemy import func, select
 
 from src.config.database import session_scope
+from src.models.allocation import Allocation
 from src.models.audit import AuditLog
 from src.models.company import Company
 from src.models.match import Match
 from src.models.match_run import MatchRun
 from src.models.policy import Policy
+from src.models.policy_group import PolicyGroup
 from src.models.rule import Rule
 from src.models.user import User
 from src.services import match_service, policy_service
@@ -33,6 +37,7 @@ from scripts.demo_config import (
     DEMO_USERS,
     ORG,
     POLICIES,
+    POLICY_GROUPS,
     SEED_RUN,
 )
 
@@ -86,6 +91,36 @@ def ensure_policies(db) -> list[Policy]:
         )
     db.flush()
     return list(db.scalars(select(Policy).order_by(Policy.id)).all())
+
+
+def ensure_groups(db, policies: list[Policy]) -> int:
+    """自然键 code upsert：同步组主数据与政策归属，不覆盖用户改过的公示状态。"""
+    by_code = {item.code: item for item in policies}
+    for spec in POLICY_GROUPS:
+        group = db.scalar(select(PolicyGroup).where(PolicyGroup.code == spec["code"]))
+        if group is None:
+            group = PolicyGroup(
+                code=spec["code"],
+                name=spec["name"],
+                quota_official=spec["quota_official"],
+                quota_waitlist=spec["quota_waitlist"],
+                public_status=spec["public_status"],
+                note=spec["note"],
+                seed_key=f"seed-group-{spec['code']}",
+            )
+            db.add(group)
+            db.flush()
+        else:
+            group.name = spec["name"]
+            group.quota_official = spec["quota_official"]
+            group.quota_waitlist = spec["quota_waitlist"]
+            group.note = spec["note"]
+        for policy_code in spec["policy_codes"]:
+            policy = by_code.get(policy_code)
+            if policy is not None:
+                policy.group_id = group.id
+    db.flush()
+    return db.scalar(select(func.count()).select_from(PolicyGroup)) or 0
 
 
 def ensure_rules(db, policies: list[Policy]) -> int:
@@ -159,6 +194,7 @@ def seed_all() -> dict:
     with session_scope() as db:
         users = ensure_users(db)
         policies = ensure_policies(db)
+        groups = ensure_groups(db, policies)
         ensure_rules(db, policies)
         ensure_companies(db)
         ensure_match_run(db)
@@ -171,6 +207,7 @@ def seed_all() -> dict:
         pending = db.scalar(select(func.count()).select_from(Match).where(Match.status == "pending")) or 0
         rules = db.scalar(select(func.count()).select_from(Rule)) or 0
         companies = db.scalar(select(func.count()).select_from(Company)) or 0
+        allocations = db.scalar(select(func.count()).select_from(Allocation)) or 0
         summary = (
             f"SEED_SUMMARY brand=policyfit users={users} sources={channels} "
             f"runs={runs} findings={matches} pending={pending}"
@@ -178,6 +215,7 @@ def seed_all() -> dict:
         print(summary, flush=True)
         print(
             f"SEED_DETAIL policies={policy_count} rules={rules} companies={companies} "
+            f"groups={groups} allocations={allocations} "
             f"p0={db.scalar(select(func.count()).select_from(Match).where(Match.priority == 'P0')) or 0}",
             flush=True,
         )
@@ -190,6 +228,8 @@ def seed_all() -> dict:
             "policies": policy_count,
             "rules": rules,
             "companies": companies,
+            "groups": groups,
+            "allocations": allocations,
         }
 
 

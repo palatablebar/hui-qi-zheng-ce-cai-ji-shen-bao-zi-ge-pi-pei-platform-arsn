@@ -216,6 +216,29 @@ POLICIES: list[dict] = [
     },
 ]
 
+# ---------------------------------------------------------------- 政策组（互斥 + 名额 + 公示状态）
+# 同组政策互斥：同一企业同组最多占一个名额；名额按组核算，不按项目分别核算。
+POLICY_GROUPS: list[dict] = [
+    {
+        "code": "GRP-ZJTX",
+        "name": "专精特新梯度培育组",
+        "quota_official": 3,
+        "quota_waitlist": 2,
+        "public_status": "publicizing",
+        "policy_codes": ["P2026-ZJTX", "P2026-ZSCQ"],
+        "note": "同一企业同一年度在专精特新培育资助与质押融资贴息中只能二选一占位。",
+    },
+    {
+        "code": "GRP-YFCX",
+        "name": "研发创新扶持组",
+        "quota_official": 2,
+        "quota_waitlist": 2,
+        "public_status": "unpublished",
+        "policy_codes": ["P2026-GXJS", "P2026-RZZX"],
+        "note": "高企认定奖励与研发机构建设资助互斥，按统一得分顺序分配正式与候补名额。",
+    },
+]
+
 # ---------------------------------------------------------------- 企业画像
 # 先按「园区/区外 × 行业 × 资质 × 数量」分组，再生成具体企业；保证分布可控、可复现。
 COMPANY_SPECS: list[dict] = [

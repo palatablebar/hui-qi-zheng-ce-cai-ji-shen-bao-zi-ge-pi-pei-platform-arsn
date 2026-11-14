@@ -19,6 +19,7 @@ def create_run(db: Session, payload: dict, principal: dict, request: Request) ->
         trigger=payload.get("trigger") or "manual",
         policy_codes=payload.get("policy_codes") or None,
     )
+    reused = bool(getattr(run, "_reused", False))
     audit_service.record(
         db,
         actor_email=principal["email"],
@@ -32,19 +33,22 @@ def create_run(db: Session, payload: dict, principal: dict, request: Request) ->
             "companies": run.company_count,
             "matches": run.match_count,
             "p0": run.p0_count,
+            "batch_key": run.batch_key,
+            "reused": reused,
         },
         ip=_ip(request),
     )
-    audit_service.record(
-        db,
-        actor_email=principal["email"],
-        actor_role=principal["role"],
-        action="match.complete",
-        entity="match_run",
-        entity_id=run.id,
-        detail={"status": run.status, "match_count": run.match_count},
-        ip=_ip(request),
-    )
+    if not reused:
+        audit_service.record(
+            db,
+            actor_email=principal["email"],
+            actor_role=principal["role"],
+            action="match.complete",
+            entity="match_run",
+            entity_id=run.id,
+            detail={"status": run.status, "match_count": run.match_count},
+            ip=_ip(request),
+        )
     db.commit()
     return match_service.serialize_run(run)
 

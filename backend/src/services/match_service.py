@@ -1,6 +1,7 @@
-"""匹配服务：执行资格匹配（算法 B）、结果查询与复核。"""
+"""匹配服务：执行资格匹配（算法 B）、名额分配、结果查询与复核。"""
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 
 from sqlalchemy import func, or_, select
@@ -16,9 +17,15 @@ from src.models.match import Match
 from src.models.match_run import MatchRun
 from src.models.policy import Policy
 from src.models.rule import Rule
-from src.services import match_engine
+from src.services import allocation_service, match_engine
 from src.utils.errors import AppError
 from src.utils.timeutil import iso_date, iso_utc, local_now, utcnow
+
+
+def batch_key_for(policy_codes: list[str]) -> str:
+    """批次键：同一组政策窗口视为同一批；重跑同一批不新增名单、不改换既定结果。"""
+    digest = hashlib.sha1(",".join(sorted(policy_codes)).encode("utf-8")).hexdigest()[:16]
+    return f"batch-{digest}"
 
 
 def next_run_no(db: Session) -> str:
@@ -42,6 +49,8 @@ def serialize_run(run: MatchRun) -> dict:
         "params": run.params or {},
         "metrics": run.metrics or {},
         "log_text": run.log_text or "",
+        "batch_key": run.batch_key,
+        "reused": bool(getattr(run, "_reused", False)),
         "started_at": iso_utc(run.started_at),
         "finished_at": iso_utc(run.finished_at),
     }
@@ -53,6 +62,7 @@ def serialize_match(
     policy: Policy | None = None,
     company: Company | None = None,
     run: MatchRun | None = None,
+    allocation: dict | None = None,
 ) -> dict:
     return {
         "id": match.id,
@@ -76,6 +86,7 @@ def serialize_match(
         "reviewer": match.reviewer,
         "note": match.note,
         "payload": match.payload or {},
+        "allocation": allocation,
         "created_at": iso_utc(match.created_at),
         "updated_at": iso_utc(match.updated_at),
     }
@@ -106,10 +117,15 @@ def run_matching(
     today: date | None = None,
     seed_key: str | None = None,
 ) -> MatchRun:
-    """执行一次匹配；同样的政策窗口 + 企业池两次结果一致（确定性）。"""
+    """执行一次匹配；同样的政策窗口 + 企业池两次结果一致（确定性）。
+
+    批次幂等：政策窗口相同的运行共享 batch_key，重跑同一批直接返回既定运行，
+    不新增名单、不改换既定结果（含名额占位与复核状态）。
+    """
     if seed_key:
         existing = db.scalar(select(MatchRun).where(MatchRun.seed_key == seed_key))
         if existing is not None:
+            existing._reused = True  # noqa: SLF001 - 瞬态标记，仅用于本次响应
             return existing
 
     if policy_codes:
@@ -124,6 +140,12 @@ def run_matching(
     if not policies:
         raise AppError("VALIDATION", 422, {"reason": "没有可匹配的政策（需为申报中）"})
 
+    batch_key = batch_key_for([item.code for item in policies])
+    existing = db.scalar(select(MatchRun).where(MatchRun.batch_key == batch_key))
+    if existing is not None:
+        existing._reused = True  # noqa: SLF001 - 瞬态标记，仅用于本次响应
+        return existing
+
     companies = list(db.scalars(select(Company).order_by(Company.id)).all())
     reference = today or local_now().date()
 
@@ -136,6 +158,7 @@ def run_matching(
         company_count=len(companies),
         params={"policy_codes": [item.code for item in policies], "today": reference.isoformat()},
         seed_key=seed_key,
+        batch_key=batch_key,
     )
     db.add(run)
     db.flush()
@@ -143,6 +166,7 @@ def run_matching(
     priority_counter = {"P0": 0, "P1": 0, "P2": 0}
     scores: list[float] = []
     match_count = 0
+    created_matches: list[Match] = []
     log_lines: list[str] = [f"匹配窗口：{len(policies)} 条政策 × {len(companies)} 家企业"]
     for policy in policies:
         rules = list(db.scalars(select(Rule).where(Rule.policy_id == policy.id).order_by(Rule.id)).all())
@@ -181,22 +205,38 @@ def run_matching(
             match_count += 1
             priority_counter[result["priority"]] += 1
             scores.append(result["score"])
-            db.add(
-                Match(
-                    run_id=run.id,
-                    policy_id=policy.id,
-                    company_id=company.id,
-                    score=result["score"],
-                    hard_pass=True,
-                    gaps=result["gaps"],
-                    priority=result["priority"],
-                    status="pending",
-                    payload=result["payload"],
-                )
+            match = Match(
+                run_id=run.id,
+                policy_id=policy.id,
+                company_id=company.id,
+                score=result["score"],
+                hard_pass=True,
+                gaps=result["gaps"],
+                priority=result["priority"],
+                status="pending",
+                payload=result["payload"],
             )
+            db.add(match)
+            created_matches.append(match)
         log_lines.append(
             f"{policy.code} {policy.title}：条件 {len(rule_dicts)} 条，硬条件通过 {passed} 家"
         )
+    db.flush()
+
+    allocation_result = allocation_service.allocate_for_run(
+        db, run_id=run.id, batch_key=batch_key, policies=policies, matches=created_matches
+    )
+    for summary in allocation_result["groups"]:
+        if summary["locked"]:
+            log_lines.append(
+                f"{summary['code']} {summary['name']}：已公示锁定，既定名单不动"
+            )
+        else:
+            log_lines.append(
+                f"{summary['code']} {summary['name']}：正式 {summary['official_used']}/{summary['official_quota']}"
+                f"（余 {summary['official_remaining']}），候补 {summary['waitlist_used']}/{summary['waitlist_quota']}，"
+                f"互斥淘汰 {summary['excluded_count']}，本批新增占位 {summary['created']}"
+            )
 
     run.match_count = match_count
     run.p0_count = priority_counter["P0"]
@@ -212,6 +252,8 @@ def run_matching(
         "avg_score": round(sum(scores) / len(scores), 1) if scores else 0.0,
         "top_score": max(scores) if scores else 0.0,
         "today": reference.isoformat(),
+        "allocations_created": allocation_result["created"],
+        "groups": allocation_result["groups"],
     }
     run.log_text = "\n".join(log_lines + [f"合计进入申报清单 {match_count} 条，P0 {priority_counter['P0']} 条"])
     run.finished_at = utcnow()
@@ -287,12 +329,14 @@ def list_matches(
         ).all()
     )
     policies, companies, runs = _load_maps(db, rows)
+    allocation_map = allocation_service.allocations_for_matches(db, rows)
     items = [
         serialize_match(
             row,
             policy=policies.get(row.policy_id),
             company=companies.get(row.company_id),
             run=runs.get(row.run_id),
+            allocation=allocation_map.get((row.policy_id, row.company_id)),
         )
         for row in rows
     ]
@@ -310,7 +354,14 @@ def detail(db: Session, match: Match) -> dict:
     policy = db.get(Policy, match.policy_id)
     company = db.get(Company, match.company_id)
     run = db.get(MatchRun, match.run_id)
-    data = serialize_match(match, policy=policy, company=company, run=run)
+    allocation_map = allocation_service.allocations_for_matches(db, [match])
+    data = serialize_match(
+        match,
+        policy=policy,
+        company=company,
+        run=run,
+        allocation=allocation_map.get((match.policy_id, match.company_id)),
+    )
     data["company"] = (
         {
             "id": company.id,

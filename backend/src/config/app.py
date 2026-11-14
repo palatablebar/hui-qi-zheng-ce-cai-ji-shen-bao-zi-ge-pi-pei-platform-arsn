@@ -23,6 +23,45 @@ def _bootstrap_database() -> None:
 
     wait_for_db()
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
+
+
+def _ensure_columns() -> None:
+    """轻量列迁移：create_all 只建新表不补列，这里为既有库补齐新增列（幂等）。"""
+    from sqlalchemy import inspect, text
+
+    additions = {
+        "policies": {"group_id": "INTEGER"},
+        "match_runs": {"batch_key": "VARCHAR(60)"},
+    }
+    with engine.begin() as conn:
+        inspector = inspect(conn)
+        existing_tables = set(inspector.get_table_names())
+        for table, columns in additions.items():
+            if table not in existing_tables:
+                continue
+            existing_columns = {column["name"] for column in inspector.get_columns(table)}
+            for column, ddl in columns.items():
+                if column in existing_columns:
+                    continue
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
+        if "match_runs" in existing_tables:
+            unique_constraints = inspector.get_unique_constraints("match_runs")
+            unique_indexes = [
+                index for index in inspector.get_indexes("match_runs") if index.get("unique")
+            ]
+            covered = any(
+                "batch_key" in (item.get("column_names") or [])
+                for item in [*unique_constraints, *unique_indexes]
+            )
+            if not covered:
+                conn.execute(
+                    text("CREATE UNIQUE INDEX uq_match_runs_batch_key ON match_runs (batch_key)")
+                )
+        if "policies" in existing_tables:
+            indexes = {index["name"] for index in inspector.get_indexes("policies")}
+            if "ix_policies_group_id" not in indexes:
+                conn.execute(text("CREATE INDEX ix_policies_group_id ON policies (group_id)"))
 
 
 def _run_seed_once() -> None:

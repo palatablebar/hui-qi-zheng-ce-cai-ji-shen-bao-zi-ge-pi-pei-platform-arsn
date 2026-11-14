@@ -1,5 +1,5 @@
 import { api } from '../api.js';
-import { ENUMS, runTone } from '../config.js';
+import { ENUMS, publicStatusTone, runTone } from '../config.js';
 import { drawer, errorBox, errorMessage, esc, fmtTime, kv, table, toast } from '../ui.js';
 
 async function download(path, filename) {
@@ -21,6 +21,7 @@ function openRun(view, run) {
       ['企业数', esc(run.company_count)],
       ['进入清单', `${esc(run.match_count)} 条`],
       ['P0', `${esc(run.p0_count)} 条`],
+      ['批次键', `<span class="mono">${esc(run.batch_key || '—')}</span>`],
       ['参数', `<span class="mono">${esc(JSON.stringify(run.params || {}))}</span>`],
       ['指标', `<span class="mono">${esc(JSON.stringify(run.metrics || {}))}</span>`],
     ])}
@@ -29,11 +30,33 @@ function openRun(view, run) {
   });
 }
 
+function groupTable(groups) {
+  if (!groups.length) return '';
+  return `<h3 style="margin:16px 0 8px;font-size:0.98rem">政策组名额台账（与工作台同步）</h3>
+  ${table({
+    rows: groups,
+    empty: { title: '还没有政策组', hint: '政策运营可在政策库为政策编组。' },
+    columns: [
+      { key: 'code', label: '组编号', className: 'mono' },
+      { key: 'name', label: '组名称', render: (row) => `<b>${esc(row.name)}</b><div class="mono muted">${esc((row.policies || []).map((item) => item.code).join(' · '))}</div>` },
+      { key: 'public_status', label: '公示状态', render: (row) => `<span class="badge ${publicStatusTone(row.public_status)}">${esc(row.public_status_label)}</span>` },
+      { key: 'official', label: '正式（已占/名额/剩余）', className: 'mono', render: (row) => `${row.stats.official_used} / ${row.quota_official} / ${row.stats.official_remaining}` },
+      { key: 'waitlist', label: '候补（已占/名额）', className: 'mono', render: (row) => `${row.stats.waitlist_used} / ${row.quota_waitlist}` },
+      { key: 'excluded', label: '互斥淘汰', className: 'num', render: (row) => row.stats.excluded_count },
+      { key: 'revoked', label: '已撤销', className: 'num', render: (row) => row.stats.revoked_count },
+    ],
+  })}`;
+}
+
 export const exportsPage = {
   async render(view, ctx) {
     let runs;
+    let groups = { items: [] };
     try {
-      runs = await api.get('/api/match-runs', { limit: 20 });
+      [runs, groups] = await Promise.all([
+        api.get('/api/match-runs', { limit: 20 }),
+        api.get('/api/policy-groups'),
+      ]);
     } catch (err) {
       view.innerHTML = errorBox(errorMessage(err));
       view.querySelector('#retry-btn')?.addEventListener('click', () => exportsPage.render(view, ctx));
@@ -49,15 +72,22 @@ export const exportsPage = {
         <div class="panel-body export-block">
           <div class="export-note">
             导出列：序号 / 运行编号 / 政策编号与标题 / 发文机关 / 申报截止 / 企业名称 / 行业 / 注册地 /
-            营业收入 / 研发占比 / 员工人数 / 匹配得分 / 优先级 / 硬条件 / 缺口提示 / 复核状态 / 复核人 / 备注。
-            排序：P0 → P1 → P2，同优先级按得分降序。只导出硬条件全部通过的企业。
+            营业收入 / 研发占比 / 员工人数 / 匹配得分 / 优先级 / 硬条件 / 缺口提示 / 复核状态 / 复核人 / 备注 /
+            政策组 / 名额状态 / 递补顺序 / 递补关系。
+            排序：P0 → P1 → P2，同优先级按得分降序。只导出硬条件全部通过的企业；
+            名额台账 CSV 另含每组已占、剩余、互斥淘汰与递补关系。
           </div>
           <div class="filter-bar">
             <button class="btn accent" id="export-latest">导出本次运行（${latest ? latest.match_count : 0} 条）</button>
             <button class="btn ghost" id="export-all">导出全部匹配结果</button>
+            <button class="btn ghost" id="export-groups">导出名额台账 CSV</button>
             <button class="btn ghost" id="export-policies">导出政策台账 CSV</button>
           </div>
         </div>
+        <div class="panel-body" style="padding-top:0">
+          ${groupTable(groups.items || [])}
+        </div>
+        <div id="runs-table">
         ${table({
           rows: runs.items,
           empty: { title: '还没有匹配运行', hint: '到匹配工作台发起一次。' },
@@ -76,12 +106,16 @@ export const exportsPage = {
             },
           ],
         })}
+        </div>
       </section>`;
     view.querySelector('#export-latest')?.addEventListener('click', () => {
       if (latest) download(`/api/exports/matches.csv?run_id=${latest.id}`, 'policyfit-matches.csv');
     });
     view.querySelector('#export-all')?.addEventListener('click', () => {
       download('/api/exports/matches.csv', 'policyfit-matches-all.csv');
+    });
+    view.querySelector('#export-groups')?.addEventListener('click', () => {
+      download('/api/exports/groups.csv', 'policyfit-groups.csv');
     });
     view.querySelector('#export-policies')?.addEventListener('click', () => {
       download('/api/exports/policies.csv', 'policyfit-policies.csv');
@@ -92,7 +126,7 @@ export const exportsPage = {
         download(`/api/exports/matches.csv?run_id=${button.dataset.exportRun}`, 'policyfit-matches.csv');
       });
     });
-    view.querySelectorAll('table.data tbody tr').forEach((row) => {
+    view.querySelectorAll('#runs-table table.data tbody tr').forEach((row) => {
       row.addEventListener('click', () => {
         const run = runs.items.find((item) => String(item.id) === row.dataset.id);
         if (run) openRun(view, run);

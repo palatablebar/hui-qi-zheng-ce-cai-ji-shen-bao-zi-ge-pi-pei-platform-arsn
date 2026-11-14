@@ -15,10 +15,10 @@
   1. 09:10 政策运营沈砚在「政策库」登记《2026 年度专精特新培育资助》，文号 `苏园经发〔2026〕18 号`；
   2. 粘贴原文后点「重新抽取申报条件」，系统抽出 4 条条件，其中「研发投入强度不低于百分之三」置信度 0.55，标红待人工确认；
   3. 10:00 专员顾清打开「企业画像」，确认 120 家客户的营收 / 研发占比 / 资质（客户经理只读且看不到电话）；
-  4. 10:20 在「匹配工作台」选择「2026 年 11 月第二批申报窗口」发起匹配，840 个组合中 40 家进入清单，P0 6 条；
+  4. 10:20 在「匹配工作台」选择「2026 年 11 月第二批申报窗口」发起匹配，840 个组合中 40 家进入清单；互斥政策组按统一得分顺序一次分好正式与候补名额（重跑同一窗口不新增、不改换）；
   5. 10:35 打开「苏州锐驰精密机械有限公司」，缺口显示「研发占比 2.8% < 3%（差 0.2pt）」，复核为 confirmed 并写备注；
-  6. 10:50 在「申报清单」导出 CSV（40 行 + 表头，UTF-8 BOM，Excel 直接打开）；
-  7. 11:00 组长在「审计日志」核对抽取 / 运行 / 复核 / 导出的操作人。
+  6. 10:50 在「申报清单」导出 CSV（40 行 + 表头，UTF-8 BOM，Excel 直接打开）；名额台账 CSV 同步列出每组已占 / 剩余 / 互斥淘汰与递补关系；
+  7. 11:00 组长在「审计日志」核对抽取 / 运行 / 复核 / 撤销递补 / 导出的操作人；公示期间有企业放弃，撤销其正式占位，同组下一位候补自动递补转正。
 
 ## 2. 角色与权限
 
@@ -30,16 +30,17 @@
 
 密码统一：`Demo@2026`。低权角色调用高权接口返回 **403**（真实 HTTP 状态，不是前端隐藏），无 token 返回 **401**。
 
-已实现 403 的接口：`POST /api/policies`、`POST /api/policies/{id}/extract-rules`、`POST /api/companies`、`POST /api/match-runs`、`PATCH /api/matches/{id}/review`、`GET /api/audit`、`GET /api/exports/matches.csv`。
+已实现 403 的接口：`POST /api/policies`、`POST /api/policies/{id}/extract-rules`、`POST /api/companies`、`POST /api/match-runs`、`PATCH /api/matches/{id}/review`、`POST /api/policy-groups`、`PATCH /api/policy-groups/{id}`、`POST /api/allocations/{id}/revoke`、`GET /api/audit`、`GET /api/exports/matches.csv`。
 
 ## 3. 功能模块（可串成链路）
 
-1. **政策库**：政策台账（编号 / 标题 / 发文机关 / 文号 / 采集渠道 / 截止日 / 资助上限 / 原文）的登记、筛选、详情；详情页展示原文与抽取出的条件。
+1. **政策库**：政策台账（编号 / 标题 / 发文机关 / 文号 / 采集渠道 / 截止日 / 资助上限 / 原文 / 所属政策组）的登记、筛选、详情；详情页展示原文与抽取出的条件。
 2. **条件抽取**：`POST /api/policies/{id}/extract-rules` 调算法 A，按自然键 `(policy_id, field, op, value)` 幂等落库；置信度 < 0.60 的条件标红待人工。
 3. **企业画像**：120 家企业的行业 / 注册地 / 营收 / 研发占比 / 员工数 / 资质 / 联系人；`viewer` 联系人掩码为 `***`。
-4. **匹配工作台**：`POST /api/match-runs` 调算法 B，只把硬条件全过的企业写入清单，输出得分 / 优先级 / 缺口；复核 `confirmed/dismissed` 留痕。
-5. **申报清单导出**：`GET /api/exports/matches.csv`（按 P0→P1→P2、得分降序）与 `GET /api/exports/policies.csv`。
-6. **审计**：登录、政策新建/修改、条件抽取、企业修改、匹配运行、复核、导出全部落 `audit_logs`（HTTP 层 + 领域层两条）。
+4. **政策组与名额**：互斥政策编为一组（`policy_groups`），组级正式 / 候补名额 + 公示状态（未公示 / 公示中 / 已公示）；同一企业同组最多占一个名额，名额按组核算，不按项目分别核算，避免超额占位。
+5. **匹配工作台**：`POST /api/match-runs` 一次完成「硬条件候选 → 组内统一顺序分配正式与候补名额」；同一政策窗口视为同一批（`batch_key`），**重跑同一批不新增名单、不改换既定结果**；撤销一个正式占位只让同组下一位候补递补；工作台同步展示每组已占、剩余、互斥淘汰与递补关系。
+6. **申报清单导出**：`GET /api/exports/matches.csv`（按 P0→P1→P2、得分降序，含政策组 / 名额状态 / 递补顺序 / 递补关系列）、`GET /api/exports/groups.csv`（名额台账：每组已占 / 剩余 / 互斥淘汰 / 递补关系）与 `GET /api/exports/policies.csv`。
+7. **审计**：登录、政策新建/修改、条件抽取、企业修改、匹配运行、复核、政策组调整、撤销与递补、导出全部落 `audit_logs`（HTTP 层 + 领域层两条）。
 
 ## 4. 快速启动
 
@@ -56,7 +57,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 # SEED_SUMMARY brand=policyfit users=3 sources=12 runs=1 findings=40 pending=40
 ```
 
-数据口径：12 条政策（其中 3 条条件歧义）、38 条条件、120 家企业、1 次匹配运行（40 条结果，P0 6 条，pending 全部）。
+数据口径：12 条政策（其中 3 条条件歧义）、2 个互斥政策组（专精特新梯度培育组·公示中、研发创新扶持组·未公示）、38 条条件、120 家企业、1 次匹配运行（40 条结果，pending 全部；组内正式 / 候补 / 互斥淘汰占位一次生成）。
 
 ## 5. 本地开发
 
@@ -92,16 +93,16 @@ cd frontend/site && python -m http.server 5173   # 静态站，/api 指到 8000
 backend/
   src/config      配置 / SQLAlchemy engine / Celery
   src/constants   enums（共享枚举唯一后端定义处）、roles、log_templates、limits
-  src/models      policy / rule / company / match_run / match / user / audit
-  src/schemas     policy / company / match / match_run / auth / common
-  src/services    rule_extractor(算法A) / match_engine(算法B) / policy / company / match / overview / export / audit / auth
-  src/controllers policy / company / match / export / auth
-  src/routes      policies / companies / match-runs / matches / exports / overview / audit / auth / health
-  scripts         demo_config（12 政策 + 120 企业）/ seed_demo / worker_healthcheck.sh
-  tests           test_rule_extractor.py / test_match_engine.py / test_security.py
+  src/models      policy_group / policy / rule / company / match_run / match / allocation / user / audit
+  src/schemas     policy / policy_group / company / match / match_run / allocation / auth / common
+  src/services    rule_extractor(算法A) / match_engine(算法B) / allocation_engine(算法C) / policy / company / match / allocation / overview / export / audit / auth
+  src/controllers policy / policy_group / company / match / allocation / export / auth
+  src/routes      policies / policy-groups / companies / match-runs / matches / allocations / exports / overview / audit / auth / health
+  scripts         demo_config（12 政策 + 2 政策组 + 120 企业）/ seed_demo / worker_healthcheck.sh
+  tests           test_rule_extractor.py / test_match_engine.py / test_allocation_engine.py / test_allocation_flow.py / test_security.py
 frontend/site/
   css/tokens.css  政务档案色板 + 双字体
-  css/app.css     红头 / 登记簿 / 案卷目录 / 截止周历 / 条件清单
+  css/app.css     红头 / 登记簿 / 案卷目录 / 截止周历 / 条件清单 / 政策组名额条
   js/{config,api,store,ui,app}.js
   js/pages/{login,overview,policies,companies,matches,exports,audit}.js
 ```
@@ -141,6 +142,17 @@ frontend/site/
 - **可复现**：当前日期由调用方传入（运行记录 `params.today`），同输入两次结果逐字一致。
 - **落库规则**：一次运行只把 `hard_pass=True` 的组合写入 `matches`；`(run_id, policy_id, company_id)` 唯一。
 
+### 算法 C｜名额分配（`backend/src/services/allocation_engine.py`，纯函数）
+
+- **输入**：一次运行中硬条件全过的 `(policy, company, score)` 候选 + 组内既有占位 + 组级名额（正式 / 候补）。
+- **统一顺序**：得分降序 → 企业 id 升序 → 政策 id 升序（确定性，同输入两次结果一致）。
+- **互斥**：同一企业在同组最多占一个名额，落在其得分最高的政策；该企业在组内其余组合记「互斥淘汰」。
+- **名额**：先分正式名额，再分候补名额；都满记「名额已满」淘汰；候补水位即递补顺序（按位次升序）。
+- **既定结果不改**：组内已有占位记录（含已撤销 / 已淘汰）的企业不再参与新一轮分配；新分配的位次从既定位次最大值之后续排。
+- **批次幂等**：政策窗口相同的运行共享 `batch_key`（政策编号排序哈希），重跑同一批直接返回既定运行，不新增名单、不改换既定结果。
+- **公示状态**：`unpublished → publicizing → finalized`；已公示（finalized）为终态——运行不再向该组新增占位，占位不可撤销，状态不可回退。
+- **撤销与递补**：`POST /api/allocations/{id}/revoke` 撤销正式 / 候补占位；撤销正式占位时同组位次最前的候补递补转正（只递补一位，`promoted_from_id` 留痕递补关系）。
+
 ## 11. 共享枚举出现位置
 
 | 枚举 | 后端 | 前端 |
@@ -152,6 +164,8 @@ frontend/site/
 | 条件运算符 `<= / >= / == / in` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.ruleOp`） |
 | 优先级 `P0/P1/P2` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.priority`） |
 | 复核状态 `pending/confirmed/dismissed` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.review`） |
+| 公示状态 `unpublished/publicizing/finalized` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.publicStatus`） |
+| 名额状态 `official/waitlist/excluded/revoked`、淘汰原因 `mutex/quota` | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.allocation` / `ENUMS.exclusionReason`） |
 | 运行状态 / 触发方式 | `backend/src/constants/enums.py` | `frontend/site/js/config.js`（`ENUMS.runStatus` / `ENUMS.trigger`） |
 
 ## 12. Docker 说明

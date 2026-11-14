@@ -35,13 +35,15 @@ export const PERMISSIONS = {
   admin: [
     'overview:read', 'policy:read', 'policy:write', 'company:read', 'company:write',
     'rule:read', 'rule:extract', 'match:read', 'match:run', 'match:review',
+    'group:read', 'group:write', 'allocation:read', 'allocation:revoke',
     'export:read', 'audit:read',
   ],
   analyst: [
     'overview:read', 'policy:read', 'company:read', 'company:write',
-    'rule:read', 'rule:extract', 'match:read', 'match:run', 'match:review', 'export:read',
+    'rule:read', 'rule:extract', 'match:read', 'match:run', 'match:review',
+    'group:read', 'allocation:read', 'allocation:revoke', 'export:read',
   ],
-  viewer: ['overview:read', 'policy:read', 'company:read', 'rule:read', 'match:read'],
+  viewer: ['overview:read', 'policy:read', 'company:read', 'rule:read', 'match:read', 'group:read', 'allocation:read'],
 };
 
 export const ENUMS = {
@@ -49,6 +51,9 @@ export const ENUMS = {
   channel: { website: '政府门户', wechat: '公众号', gazette: '政策公报', forward: '转发通知' },
   priority: { P0: 'P0 优先', P1: 'P1 跟进', P2: 'P2 观察' },
   review: { pending: '待复核', confirmed: '已确认', dismissed: '已驳回' },
+  publicStatus: { unpublished: '未公示', publicizing: '公示中', finalized: '已公示' },
+  allocation: { official: '正式占位', waitlist: '候补', excluded: '淘汰', revoked: '已撤销' },
+  exclusionReason: { mutex: '互斥淘汰', quota: '名额已满' },
   runStatus: { queued: '排队中', running: '执行中', success: '成功', partial: '部分成功', failed: '失败' },
   trigger: { manual: '手动', schedule: '定时', seed: '初始化' },
   ruleField: {
@@ -81,6 +86,14 @@ export function policyTone(status) {
 
 export function runTone(status) {
   return { success: 'ok', partial: 'warn', failed: 'danger', running: 'info' }[status] || 'info';
+}
+
+export function publicStatusTone(status) {
+  return { unpublished: 'info', publicizing: 'warn', finalized: 'ok' }[status] || 'info';
+}
+
+export function allocationTone(status) {
+  return { official: 'ok', waitlist: 'warn', excluded: 'danger', revoked: 'info' }[status] || 'info';
 }
 
 export function confidenceTone(confidence) {

@@ -11,7 +11,12 @@ ACTIONS: dict[str, str] = {
     "match.run": "发起资格匹配",
     "match.complete": "匹配完成",
     "match.review": "复核匹配结果",
+    "group.create": "新建政策组",
+    "group.update": "修改政策组",
+    "allocation.revoke": "撤销名额占位",
+    "allocation.promote": "候补递补转正",
     "export.matches": "导出申报清单",
+    "export.groups": "导出名额台账",
     "export.policies": "导出政策台账",
     "http.mutation": "写请求",
 }

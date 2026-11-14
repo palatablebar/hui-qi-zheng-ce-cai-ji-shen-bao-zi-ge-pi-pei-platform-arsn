@@ -25,6 +25,8 @@ PERMISSIONS: dict[str, set[str]] = {
         "company:read", "company:write", "company:contact",
         "rule:read", "rule:extract",
         "match:read", "match:run", "match:review",
+        "group:read", "group:write",
+        "allocation:read", "allocation:revoke",
         "export:read", "audit:read", "overview:read",
     },
     Role.ANALYST.value: {
@@ -32,10 +34,13 @@ PERMISSIONS: dict[str, set[str]] = {
         "company:read", "company:write", "company:contact",
         "rule:read", "rule:extract",
         "match:read", "match:run", "match:review",
+        "group:read",
+        "allocation:read", "allocation:revoke",
         "export:read", "overview:read",
     },
     Role.VIEWER.value: {
-        "policy:read", "company:read", "rule:read", "match:read", "overview:read",
+        "policy:read", "company:read", "rule:read", "match:read",
+        "group:read", "allocation:read", "overview:read",
     },
 }
 
@@ -44,6 +49,8 @@ COMPANY_WRITE_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 EXTRACT_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 RUN_CREATE_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 REVIEW_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
+GROUP_WRITE_ROLES = (Role.ADMIN.value,)
+ALLOCATION_REVOKE_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 EXPORT_ROLES = (Role.ADMIN.value, Role.ANALYST.value)
 AUDIT_ROLES = (Role.ADMIN.value,)
 READ_ROLES = (Role.ADMIN.value, Role.ANALYST.value, Role.VIEWER.value)

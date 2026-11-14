@@ -28,3 +28,21 @@ def policies_csv(
     principal: dict = Depends(require_roles(*EXPORT_ROLES)),
 ):
     return export_controller.policies_csv(db, principal, request)
+
+
+@router.get("/groups.csv")
+def groups_csv(
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: dict = Depends(require_roles(*EXPORT_ROLES)),
+):
+    return export_controller.groups_csv(db, principal, request)
+
+
+@router.get("/groups.csv")
+def groups_csv(
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: dict = Depends(require_roles(*EXPORT_ROLES)),
+):
+    return export_controller.groups_csv(db, principal, request)

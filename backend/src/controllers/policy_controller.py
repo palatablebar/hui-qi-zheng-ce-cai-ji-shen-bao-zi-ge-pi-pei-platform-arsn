@@ -18,7 +18,7 @@ def list_policies(db: Session, **filters) -> dict:
 def get_policy(db: Session, policy_id: int) -> dict:
     policy = policy_service.get_policy(db, policy_id)
     rules = policy_service.rules_of(db, policy.id)
-    return policy_service.serialize(policy, rules)
+    return policy_service.serialize(policy, rules, group=policy_service.group_of(db, policy))
 
 
 def create_policy(db: Session, payload: dict, principal: dict, request: Request) -> dict:
@@ -34,7 +34,7 @@ def create_policy(db: Session, payload: dict, principal: dict, request: Request)
         ip=_ip(request),
     )
     db.commit()
-    return policy_service.serialize(policy, [])
+    return policy_service.serialize(policy, [], group=policy_service.group_of(db, policy))
 
 
 def update_policy(db: Session, policy_id: int, payload: dict, principal: dict, request: Request) -> dict:
@@ -51,7 +51,11 @@ def update_policy(db: Session, policy_id: int, payload: dict, principal: dict, r
         ip=_ip(request),
     )
     db.commit()
-    return policy_service.serialize(policy, policy_service.rules_of(db, policy.id))
+    return policy_service.serialize(
+        policy,
+        policy_service.rules_of(db, policy.id),
+        group=policy_service.group_of(db, policy),
+    )
 
 
 def extract_rules(db: Session, policy_id: int, principal: dict, request: Request) -> dict:
